@@ -23,10 +23,10 @@ BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIR.parent.parent
 ENV_FILE = PROJECT_ROOT / ".env"
 
-if not ENV_FILE.is_file():
-    raise RuntimeError(f".env file not found: {ENV_FILE}")
-
-load_dotenv(dotenv_path=ENV_FILE, override=True)
+# Load local .env when available.
+# Render provides environment variables through its dashboard.
+if ENV_FILE.is_file():
+    load_dotenv(dotenv_path=ENV_FILE, override=False)
 
 GEMINI_MODEL = "gemini-3.6-flash"
 EMBEDDING_MODEL = "gemini-embedding-001"
@@ -56,12 +56,19 @@ app = FastAPI(
     version="2.1.0",
 )
 
+FRONTEND_URL = os.getenv("FRONTEND_URL", "").rstrip("/")
+
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+if FRONTEND_URL:
+    ALLOWED_ORIGINS.append(FRONTEND_URL)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
