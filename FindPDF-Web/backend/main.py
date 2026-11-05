@@ -1,4 +1,3 @@
-
 import os
 import time
 import uuid
@@ -94,6 +93,7 @@ def is_gemini_quota_error(exc: Exception) -> bool:
         "too many requests",
         "429",
     )
+
     return any(indicator in message for indicator in indicators)
 
 
@@ -106,14 +106,70 @@ def gemini_quota_message() -> str:
     )
 
 
+def is_gemini_temporary_error(exc: Exception) -> bool:
+    """Identify temporary Gemini service availability errors (usually HTTP 503)."""
+    message = str(exc).lower()
+
+    indicators = (
+        "503",
+        "unavailable",
+        "high demand",
+        "service unavailable",
+        "temporarily unavailable",
+    )
+
+    return any(indicator in message for indicator in indicators)
+
+
+def call_gemini_with_retry(operation, max_attempts: int = 4):
+    """
+    Retry temporary Gemini availability failures with exponential backoff.
+
+    Retry intervals:
+    Attempt 1: Initial request
+    Attempt 2: Wait 2 seconds
+    Attempt 3: Wait 4 seconds
+    Attempt 4: Wait 8 seconds
+    """
+
+    for attempt in range(max_attempts):
+        try:
+            return operation()
+
+        except Exception as exc:
+
+            # Quota/rate-limit failures are not treated as temporary 503s.
+            if is_gemini_quota_error(exc) or not is_gemini_temporary_error(exc):
+                raise
+
+            if attempt == max_attempts - 1:
+                print(
+                    f"Gemini remained unavailable after "
+                    f"{max_attempts} attempts: {exc}"
+                )
+                raise
+
+            wait_seconds = 2 ** (attempt + 1)
+
+            print(
+                f"Gemini temporarily unavailable. Retrying in "
+                f"{wait_seconds} seconds "
+                f"(attempt {attempt + 1}/{max_attempts})."
+            )
+
+            time.sleep(wait_seconds)
+
+
 def check_rate_limit(
     request: Request,
     action: str,
     limit: int,
 ) -> None:
     """Limit requests by client IP and action within a rolling time window."""
+
     client_ip = request.client.host if request.client else "unknown"
     key = f"{action}:{client_ip}"
+
     now = time.time()
     cutoff = now - RATE_LIMIT_WINDOW_SECONDS
 
@@ -128,6 +184,7 @@ def check_rate_limit(
             1,
             int(recent[0] + RATE_LIMIT_WINDOW_SECONDS - now),
         )
+
         raise HTTPException(
             status_code=429,
             detail=(
@@ -144,6 +201,7 @@ def check_rate_limit(
 @app.exception_handler(Exception)
 async def unexpected_error_handler(request: Request, exc: Exception):
     """Avoid returning internal exception details to API clients."""
+
     from fastapi.responses import JSONResponse
 
     print(f"Unhandled server error on {request.url.path}: {exc}")
@@ -174,8 +232,10 @@ def get_gemini_client():
 
     if _gemini_client is None:
         api_key = os.getenv("GEMINI_API_KEY")
+
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY is missing from .env.")
+
         _gemini_client = genai.Client(api_key=api_key)
 
     return _gemini_client
@@ -205,14 +265,19 @@ def get_supabase_client():
 
 def extract_pdf_pages(pdf_bytes: bytes) -> list[dict[str, Any]]:
     """Extract selectable text while retaining the original page numbers."""
+
     pages = []
 
     try:
         with pymupdf.open(stream=pdf_bytes, filetype="pdf") as pdf:
             for page_number, page in enumerate(pdf, start=1):
                 text = page.get_text("text").strip()
+
                 if text:
-                    pages.append({"page": page_number, "text": text})
+                    pages.append({
+                        "page": page_number,
+                        "text": text,
+                    })
 
     except Exception as exc:
         raise ValueError(
@@ -237,6 +302,7 @@ def make_chunks(
     overlap: int = CHUNK_OVERLAP,
 ) -> list[dict[str, Any]]:
     """Create overlapping text chunks without crossing page boundaries."""
+
     chunks = []
 
     for page in pages:
@@ -270,6 +336,7 @@ def generate_embeddings(
     task_type: str,
 ) -> list[list[float]]:
     """Generate 768-dimensional vectors in batches."""
+
     if not texts:
         return []
 
@@ -279,13 +346,16 @@ def generate_embeddings(
     for start in range(0, len(texts), EMBEDDING_BATCH_SIZE):
         batch = texts[start:start + EMBEDDING_BATCH_SIZE]
 
-        response = client.models.embed_content(
-            model=EMBEDDING_MODEL,
-            contents=batch,
-            config=types.EmbedContentConfig(
-                output_dimensionality=EMBEDDING_DIMENSIONS,
-                task_type=task_type,
-            ),
+        # Retry temporary Gemini errors during embedding generation.
+        response = call_gemini_with_retry(
+            lambda: client.models.embed_content(
+                model=EMBEDDING_MODEL,
+                contents=batch,
+                config=types.EmbedContentConfig(
+                    output_dimensionality=EMBEDDING_DIMENSIONS,
+                    task_type=task_type,
+                ),
+            )
         )
 
         batch_embeddings = response.embeddings or []
@@ -304,7 +374,9 @@ def generate_embeddings(
                     "An embedding has an unexpected vector dimension."
                 )
 
-            embeddings.append([float(value) for value in vector])
+            embeddings.append([
+                float(value) for value in vector
+            ])
 
     return embeddings
 
@@ -321,6 +393,7 @@ def save_document(
     chunks: list[dict[str, Any]],
 ) -> None:
     """Persist document metadata and its embedded chunks in Supabase."""
+
     supabase = get_supabase_client()
 
     try:
@@ -357,6 +430,7 @@ def save_document(
             supabase.table("documents").delete().eq(
                 "id", document_id
             ).execute()
+
         except Exception as cleanup_error:
             print("Document cleanup failed:", cleanup_error)
 
@@ -372,6 +446,7 @@ def retrieve_chunks(
     document_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Retrieve the top semantically relevant passages from pgvector."""
+
     supabase = get_supabase_client()
 
     query_vector = generate_embeddings(
@@ -567,6 +642,7 @@ def list_documents():
 
     except Exception as exc:
         print("List documents failed:", exc)
+
         raise HTTPException(
             status_code=502,
             detail="Could not load documents from Supabase.",
@@ -613,6 +689,7 @@ def delete_document(document_id: str):
 
     except Exception as exc:
         print("Delete document failed:", exc)
+
         raise HTTPException(
             status_code=502,
             detail="Could not delete the document.",
@@ -661,7 +738,9 @@ def chat_with_documents(
                     detail="The selected documents were not found.",
                 )
 
-            selected_ids = [doc["id"] for doc in selected_documents]
+            selected_ids = [
+                doc["id"] for doc in selected_documents
+            ]
 
         else:
             selected_response = (
@@ -671,7 +750,9 @@ def chat_with_documents(
             )
 
             selected_documents = selected_response.data or []
-            selected_ids = [doc["id"] for doc in selected_documents]
+            selected_ids = [
+                doc["id"] for doc in selected_documents
+            ]
 
         if not selected_ids:
             raise HTTPException(
@@ -731,13 +812,16 @@ Retrieved passages:
 {context}
 """
 
-        response = get_gemini_client().models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.2,
-                max_output_tokens=2500,
-            ),
+        # Retry temporary Gemini errors during answer generation.
+        response = call_gemini_with_retry(
+            lambda: get_gemini_client().models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=2500,
+                ),
+            )
         )
 
         answer = (response.text or "").strip()
@@ -774,6 +858,16 @@ Retrieved passages:
                 status_code=429,
                 detail=gemini_quota_message(),
                 headers={"Retry-After": "3600"},
+            ) from exc
+
+        if is_gemini_temporary_error(exc):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Gemini is temporarily experiencing high demand. "
+                    "Please try again in a few moments."
+                ),
+                headers={"Retry-After": "30"},
             ) from exc
 
         raise HTTPException(
