@@ -42,7 +42,16 @@ FindPDF also supports querying multiple uploaded PDFs, enabling users to retriev
 | PDF Processing | PyMuPDF |
 | Data Validation | Pydantic |
 | Deployment | Vercel, Render |
-| Version Control | Git, GitHub |
+
+## Application Screenshots
+
+### FindPDF Dashboard
+
+![FindPDF Homepage](FindPDF-Web/screenshots/homepage.png)
+
+![Multiple PDF Documents](FindPDF-Web/screenshots/multiple-pdfs.png)
+
+![FindPDF Chat Response](FindPDF-Web/screenshots/chat-response.png)
 
 ## System Architecture
 
