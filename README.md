@@ -84,6 +84,16 @@ flowchart TD
     B --> O[User]
 ```
 
+## System Architecture
+
+FindPDF follows a Retrieval-Augmented Generation (RAG) architecture.
+The system processes uploaded PDFs, generates embeddings, stores them
+in Supabase, and retrieves relevant passages to generate answers using
+Google Gemini.
+
+For the detailed architecture and workflow, see
+[System Architecture Documentation](FindPDF-Web/docs/ARCHITECTURE.md).
+
 ## RAG Pipeline
 
 The application follows these main processing stages.
