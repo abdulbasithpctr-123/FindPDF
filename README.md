@@ -49,7 +49,11 @@ FindPDF also supports querying multiple uploaded PDFs, enabling users to retriev
 
 ![FindPDF Homepage](FindPDF-Web/screenshots/homepage.png)
 
+### Multiple PDF Uploads
+
 ![Multiple PDF Documents](FindPDF-Web/screenshots/multiple-pdfs.png)
+
+### AI-Powered Document Conversation
 
 ![FindPDF Chat Response](FindPDF-Web/screenshots/chat-response.png)
 
